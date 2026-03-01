@@ -7,10 +7,10 @@ const pdfParse = require("pdf-parse");
 
 function printHelp() {
   const help = [
-    "pdf2skill-lite",
+    "pdf2skill-backend",
     "",
     "Usage:",
-    "  pdf2skill-lite --input <file.pdf[,file2.pdf]> --name <skill-name> [--outdir <dir>] [--max-chunks <n>] [--min-score <n>] [--lang <auto|zh|en>]",
+    "  pdf2skill-backend --input <file.pdf[,file2.pdf]> --name <skill-name> [--outdir <dir>] [--max-chunks <n>] [--min-score <n>] [--lang <auto|zh|en>]",
     "",
     "Options:",
     "  --input, -i       Path to source PDF (repeatable or comma-separated)",

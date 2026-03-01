@@ -14,7 +14,6 @@ app.disable("x-powered-by");
 
 const uploadDir = path.join(__dirname, "tmp-uploads");
 const outDir = path.join(__dirname, "web-output");
-const webDir = path.join(__dirname, "web");
 
 fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(outDir, { recursive: true });
@@ -109,8 +108,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.static(webDir));
-
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
@@ -183,5 +180,5 @@ app.post("/api/compile", authGuard, upload.array("pdfs", 10), async (req, res) =
 });
 
 app.listen(PORT, () => {
-  process.stdout.write(`pdf2skill-lite web server running: http://localhost:${PORT}\n`);
+  process.stdout.write(`pdf2skill-backend API running: http://localhost:${PORT}\n`);
 });

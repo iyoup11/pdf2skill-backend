@@ -1,14 +1,15 @@
 {
-  "name": "pdf2skill-lite",
+  "name": "pdf2skill-backend",
   "version": "1.0.0",
-  "description": "Convert PDF into Claude/OpenCode skill pack",
+  "description": "Standalone backend and CLI for PDF to skill pack compilation",
   "main": "index.js",
   "bin": {
-    "pdf2skill-lite": "index.js"
+    "pdf2skill-backend": "index.js"
   },
   "scripts": {
     "build": "node index.js --help",
     "test": "node index.js --help",
+    "start": "node server.js",
     "web": "node server.js"
   },
   "keywords": [],

@@ -1,18 +1,14 @@
-# pdf2skill-lite
+# pdf2skill-backend
 
-Local MVP that compiles a PDF into a Claude/OpenCode skill pack.
+Standalone backend and CLI for compiling one or more PDFs into Claude/OpenCode skill packs.
 
-## Features
+## What is included
 
-- Extract text from PDF
-- Split into semantic chunks
-- Generate `SKILL.md`, `skills/index.md`, and atomic `skills/skill-xxx.md`
-- Extract step lists and IF/ELSE style branch conditions
-- Build keyword-based routing scores
-- Build dependency graph (Mermaid)
-- Accept multiple PDF inputs in one compile
-- Language-aware keyword extraction (`--lang auto|zh|en`)
-- Export both folder output and `skills.zip`
+- CLI compiler (`index.js`)
+- Backend API (`server.js`)
+- Deploy files (`Dockerfile`, `render.yaml`)
+
+This repository intentionally excludes the standalone frontend project.
 
 ## Install
 
@@ -20,34 +16,30 @@ Local MVP that compiles a PDF into a Claude/OpenCode skill pack.
 npm install
 ```
 
-## Web Mode
-
-Start website:
+## Start API
 
 ```bash
-npm run web
+npm start
 ```
 
-Then open:
+Health check:
 
-- `http://localhost:3789`
+- `GET /health`
 
-Web supports:
+Compile endpoint:
 
-- Multi-PDF upload
-- `name/lang/maxChunks/minScore` configuration
-- One-click compile and ZIP download
+- `POST /api/compile` (multipart form, field name: `pdfs`)
 
-### Security env vars (recommended)
+## Security env vars
 
-- `COMPILE_TOKEN`: enable API token auth for `/api/compile`
-- `MAX_UPLOAD_MB`: max single file upload size (default `100`)
-- `OUTPUT_TTL_HOURS`: auto cleanup old artifacts in `web-output` (default `24`)
+- `COMPILE_TOKEN`: enable token auth for `/api/compile`
+- `MAX_UPLOAD_MB`: max upload size per file (default `100`)
+- `OUTPUT_TTL_HOURS`: cleanup old artifacts in `web-output` (default `24`)
 
 Example:
 
 ```bash
-COMPILE_TOKEN=change-me MAX_UPLOAD_MB=50 OUTPUT_TTL_HOURS=12 npm run web
+COMPILE_TOKEN=change-me MAX_UPLOAD_MB=50 OUTPUT_TTL_HOURS=12 npm start
 ```
 
 When token is set, call API with header:
@@ -56,22 +48,7 @@ When token is set, call API with header:
 x-compile-token: <COMPILE_TOKEN>
 ```
 
-## Free Platform Deploy
-
-### Render
-
-- This repo already includes `Dockerfile` and `render.yaml`.
-- Push to GitHub, then create Render Web Service from the repo.
-- Render will build and run automatically.
-
-Recommended Render env vars:
-
-- `PORT=3789`
-- `COMPILE_TOKEN=<strong-random-token>`
-- `MAX_UPLOAD_MB=50`
-- `OUTPUT_TTL_HOURS=12`
-
-## Usage
+## CLI usage
 
 ```bash
 node index.js --input "D:/path/to/book.pdf" --name "game-design" --outdir "D:/output" --max-chunks 24 --min-score 55 --lang auto
@@ -90,27 +67,6 @@ If `--name game-design` and `--outdir D:/output`:
 - Folder: `D:/output/game-design/`
 - Zip: `D:/output/game-design.zip`
 
-Generated metadata includes:
+## Deploy
 
-- `skills/routes.json` (routing scores + keywords + deps)
-- `skills/dependency-graph.md` (Mermaid graph)
-
-## Flags
-
-- `--input`: one PDF path, multiple `--input` flags, or comma-separated paths
-- `--lang`: `auto` (default), `zh`, or `en`
-- `--min-score`: routing score cutoff written to metadata
-
-## Import
-
-Claude Code:
-
-```bash
-unzip "D:/output/game-design.zip" -d ~/.claude/skills/game-design/
-```
-
-OpenCode:
-
-```bash
-unzip "D:/output/game-design.zip" -d ~/.config/opencode/skills/game-design/
-```
+This repo includes `Dockerfile` and `render.yaml` for direct deployment to Render/Railway style environments.
