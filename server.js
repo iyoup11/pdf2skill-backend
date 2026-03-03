@@ -11,6 +11,14 @@ const PORT = Number.parseInt(process.env.PORT || "3789", 10);
 const COMPILE_TOKEN = (process.env.COMPILE_TOKEN || "").trim();
 const OUTPUT_TTL_HOURS = Number.parseInt(process.env.OUTPUT_TTL_HOURS || "24", 10);
 const MAX_UPLOAD_MB = Number.parseInt(process.env.MAX_UPLOAD_MB || "100", 10);
+const WECHAT_APPID = (process.env.WECHAT_APPID || "").trim();
+const WECHAT_SECRET = (process.env.WECHAT_SECRET || "").trim();
+const WECHAT_THUMB_MEDIA_ID = (process.env.WECHAT_THUMB_MEDIA_ID || "").trim();
+const WECHAT_DEFAULT_AUTHOR = (process.env.WECHAT_DEFAULT_AUTHOR || "pdf2skill").trim();
+const WECHAT_DEFAULT_SOURCE_URL = (process.env.WECHAT_DEFAULT_SOURCE_URL || "").trim();
+const WECHAT_AUTO_PUBLISH_DEFAULT = ["1", "true", "yes", "on"].includes(
+  String(process.env.WECHAT_AUTO_PUBLISH || "").trim().toLowerCase()
+);
 
 app.disable("x-powered-by");
 
@@ -69,7 +77,24 @@ function sanitizeOutputMode(input) {
   if (mode === "app") {
     return "app";
   }
+  if (mode === "wechat") {
+    return "wechat";
+  }
   return "skills";
+}
+
+function sanitizeBoolean(input, fallback) {
+  if (input === undefined || input === null || input === "") {
+    return Boolean(fallback);
+  }
+  const val = String(input).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(val)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(val)) {
+    return false;
+  }
+  return Boolean(fallback);
 }
 
 function sanitizeAppTemplate(input) {
@@ -523,7 +548,7 @@ async function writeAppBundle(zipPath, appData) {
   fs.writeFileSync(zipPath, buffer);
 }
 
-async function compileGameJson(files, options) {
+async function compilePdfText(files) {
   const segments = [];
   for (const file of files) {
     const buff = fs.readFileSync(file.path);
@@ -538,6 +563,11 @@ async function compileGameJson(files, options) {
   if (!merged.trim()) {
     throw new Error("Failed to extract text from uploaded PDFs.");
   }
+  return merged;
+}
+
+async function compileGameJson(files, options) {
+  const merged = await compilePdfText(files);
 
   return buildGamePack({
     text: merged,
@@ -549,20 +579,7 @@ async function compileGameJson(files, options) {
 }
 
 async function compileAppBundle(files, options) {
-  const segments = [];
-  for (const file of files) {
-    const buff = fs.readFileSync(file.path);
-    const parsed = await pdfParse(buff);
-    const text = String(parsed.text || "").trim();
-    if (text) {
-      segments.push(`## ${file.originalname}\n\n${text}`);
-    }
-  }
-
-  const merged = segments.join("\n\n");
-  if (!merged.trim()) {
-    throw new Error("Failed to extract text from uploaded PDFs.");
-  }
+  const merged = await compilePdfText(files);
 
   const appTemplate = sanitizeAppTemplate(options.appTemplate);
   let appData;
@@ -593,6 +610,144 @@ async function compileAppBundle(files, options) {
   const zipPath = path.join(outDir, `${options.name}-app.zip`);
   await writeAppBundle(zipPath, appData);
   return zipPath;
+}
+
+function htmlEscape(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildWechatArticleFromText(text, options) {
+  const lines = String(text || "")
+    .split(/\n+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const title = options.title || options.name || "pdf2skill 自动生成内容";
+  const digestSource = lines.join(" ").replace(/\s+/g, " ");
+  const digest = (options.digest || digestSource.slice(0, 110) || "由 PDF 自动生成").slice(0, 120);
+  const bodyParts = lines.slice(0, 120).map((ln) => `<p>${htmlEscape(ln)}</p>`);
+  const content = [
+    `<h1>${htmlEscape(title)}</h1>`,
+    `<p><em>本文由 PDF 自动转换生成，可在草稿中继续编辑后发布。</em></p>`,
+    ...bodyParts,
+  ].join("\n");
+
+  return {
+    title,
+    author: options.author || WECHAT_DEFAULT_AUTHOR,
+    digest,
+    content,
+    content_source_url: options.sourceUrl || WECHAT_DEFAULT_SOURCE_URL,
+    thumb_media_id: WECHAT_THUMB_MEDIA_ID,
+    need_open_comment: 1,
+    only_fans_can_comment: 0,
+  };
+}
+
+let wechatTokenCache = {
+  token: "",
+  expireAt: 0,
+};
+
+async function getWechatAccessToken() {
+  const now = Date.now();
+  if (wechatTokenCache.token && now < wechatTokenCache.expireAt - 60 * 1000) {
+    return wechatTokenCache.token;
+  }
+
+  const tokenUrl = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(
+    WECHAT_APPID
+  )}&secret=${encodeURIComponent(WECHAT_SECRET)}`;
+  const resp = await fetch(tokenUrl, { method: "GET" });
+  const data = await resp.json();
+  if (!resp.ok || data.errcode) {
+    throw new Error(`WeChat token failed: ${data.errmsg || resp.statusText || "unknown"}`);
+  }
+
+  const expiresIn = Number.parseInt(String(data.expires_in || "7200"), 10);
+  wechatTokenCache = {
+    token: String(data.access_token || ""),
+    expireAt: now + Math.max(300, Number.isFinite(expiresIn) ? expiresIn : 7200) * 1000,
+  };
+
+  if (!wechatTokenCache.token) {
+    throw new Error("WeChat token failed: empty access_token");
+  }
+  return wechatTokenCache.token;
+}
+
+async function callWechatApi(pathname, payload) {
+  const token = await getWechatAccessToken();
+  const url = `https://api.weixin.qq.com${pathname}${pathname.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json();
+  if (!resp.ok || data.errcode) {
+    throw new Error(`WeChat API failed: ${data.errmsg || resp.statusText || "unknown"}`);
+  }
+  return data;
+}
+
+function assertWechatEnv() {
+  const missing = [];
+  if (!WECHAT_APPID) {
+    missing.push("WECHAT_APPID");
+  }
+  if (!WECHAT_SECRET) {
+    missing.push("WECHAT_SECRET");
+  }
+  if (!WECHAT_THUMB_MEDIA_ID) {
+    missing.push("WECHAT_THUMB_MEDIA_ID");
+  }
+  if (missing.length > 0) {
+    throw new Error(`WeChat env is missing: ${missing.join(", ")}`);
+  }
+}
+
+function maskSecret(value) {
+  const s = String(value || "");
+  if (!s) {
+    return "";
+  }
+  if (s.length <= 6) {
+    return "***";
+  }
+  return `${s.slice(0, 3)}***${s.slice(-3)}`;
+}
+
+async function compileWechatPayload(files, options) {
+  assertWechatEnv();
+  const text = await compilePdfText(files);
+  const article = buildWechatArticleFromText(text, options);
+  const draftData = await callWechatApi("/cgi-bin/draft/add", { articles: [article] });
+
+  const result = {
+    ok: true,
+    mode: "wechat",
+    draftMediaId: String(draftData.media_id || ""),
+    autoPublish: Boolean(options.autoPublish),
+  };
+
+  if (!result.draftMediaId) {
+    throw new Error("WeChat draft/add succeeded but media_id is empty");
+  }
+
+  if (options.autoPublish) {
+    const publishData = await callWechatApi("/cgi-bin/freepublish/submit", {
+      media_id: result.draftMediaId,
+    });
+    result.publishId = String(publishData.publish_id || "");
+    result.publishStatus = "submitted";
+  }
+
+  return result;
 }
 
 function cleanupOldOutputs(rootDir, ttlHours) {
@@ -648,6 +803,26 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/wechat/status", authGuard, (_req, res) => {
+  res.json({
+    ok: true,
+    configured: {
+      appid: Boolean(WECHAT_APPID),
+      secret: Boolean(WECHAT_SECRET),
+      thumbMediaId: Boolean(WECHAT_THUMB_MEDIA_ID),
+    },
+    masked: {
+      appid: maskSecret(WECHAT_APPID),
+      thumbMediaId: maskSecret(WECHAT_THUMB_MEDIA_ID),
+    },
+    defaults: {
+      author: WECHAT_DEFAULT_AUTHOR,
+      sourceUrl: WECHAT_DEFAULT_SOURCE_URL,
+      autoPublish: WECHAT_AUTO_PUBLISH_DEFAULT,
+    },
+  });
+});
+
 app.post("/api/compile", authGuard, upload.array("pdfs", 10), async (req, res) => {
   const files = req.files || [];
 
@@ -676,6 +851,11 @@ app.post("/api/compile", authGuard, upload.array("pdfs", 10), async (req, res) =
   const minScore = Number.parseInt(req.body.minScore || "55", 10);
   const outputMode = sanitizeOutputMode(req.body.outputMode || req.query.outputMode || "skills");
   const appTemplate = sanitizeAppTemplate(req.body.appTemplate || req.query.appTemplate || "auto");
+  const wechatAuthor = String(req.body.wechatAuthor || "").trim();
+  const wechatSourceUrl = String(req.body.wechatSourceUrl || "").trim();
+  const wechatTitle = String(req.body.wechatTitle || "").trim();
+  const wechatDigest = String(req.body.wechatDigest || "").trim();
+  const wechatAutoPublish = sanitizeBoolean(req.body.wechatAutoPublish, WECHAT_AUTO_PUBLISH_DEFAULT);
 
   if (!skillName) {
     cleanupUploaded(files);
@@ -707,6 +887,20 @@ app.post("/api/compile", authGuard, upload.array("pdfs", 10), async (req, res) =
       res.download(appZipPath, `${skillName}-app.zip`, () => {
         cleanupUploaded(files);
       });
+      return;
+    }
+
+    if (outputMode === "wechat") {
+      const result = await compileWechatPayload(files, {
+        name: skillName,
+        title: wechatTitle,
+        author: wechatAuthor,
+        sourceUrl: wechatSourceUrl,
+        digest: wechatDigest,
+        autoPublish: wechatAutoPublish,
+      });
+      cleanupUploaded(files);
+      res.json(result);
       return;
     }
 

@@ -29,12 +29,31 @@ Health check:
 Compile endpoint:
 
 - `POST /api/compile` (multipart form, field name: `pdfs`)
+- `outputMode=skills|game|app|wechat`
+
+WeChat status endpoint:
+
+- `GET /api/wechat/status` (same auth rule as `/api/compile`)
 
 ## Security env vars
 
 - `COMPILE_TOKEN`: enable token auth for `/api/compile`
 - `MAX_UPLOAD_MB`: max upload size per file (default `100`)
 - `OUTPUT_TTL_HOURS`: cleanup old artifacts in `web-output` (default `24`)
+- `WECHAT_APPID`: WeChat official account appid (required for `outputMode=wechat`)
+- `WECHAT_SECRET`: WeChat official account secret (required for `outputMode=wechat`)
+- `WECHAT_THUMB_MEDIA_ID`: cover image media id for draft/add (required for `outputMode=wechat`)
+- `WECHAT_DEFAULT_AUTHOR`: default article author (optional)
+- `WECHAT_DEFAULT_SOURCE_URL`: default content source url (optional)
+- `WECHAT_AUTO_PUBLISH`: default auto publish behavior, `true|false` (optional)
+
+When `outputMode=wechat`, optional form fields:
+
+- `wechatTitle`: article title override
+- `wechatAuthor`: article author override
+- `wechatSourceUrl`: article source URL override
+- `wechatDigest`: article digest override (<=120 chars recommended)
+- `wechatAutoPublish`: `true|false`, whether to call `freepublish/submit`
 
 Example:
 
@@ -70,3 +89,5 @@ If `--name game-design` and `--outdir D:/output`:
 ## Deploy
 
 This repo includes `Dockerfile` and `render.yaml` for direct deployment to Render/Railway style environments.
+
+Railway env template: `.env.railway.example`
